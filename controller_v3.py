@@ -24,7 +24,7 @@ UNFIN_BIG=1000  #正无穷
 添加peer路由请求回应方法
 修改EXEComm函数，添加路由请求回应
 '''
-
+ 
 class Controller():
 
     def __init__(self, port=5555, MaxConnect=100):
