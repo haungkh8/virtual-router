@@ -6,7 +6,7 @@ import random
 from tools import *
 
 import os
-UNFIN_BIG=1000
+UNFIN_BIG=1000  #正无穷
 '''错误重复的信息
     每个路由器会保持一个和controller之间的连接。定时发送在线信息并更新路由表。
     路由器和路由器之间的连接是固定的，但是数据包转发的连接时由路由表决定的。
@@ -207,7 +207,7 @@ class Controller():
                         if new_dis<distlist[ip1][key]:
                             distlist[ip1][key]=new_dis
                             pathlist[key][ip1]=_min 
-                                                       
+
         return pathlist
         pass
 
@@ -223,18 +223,18 @@ class Controller():
         header = ("UPDATE "+str(len(send_data))).encode('utf8')
         padding=[32 for x in range(HEADER_SIZE-len(header))]
 
-        connlist[ip].sendall(header)
-        connlist[ip].sendall(bytes(padding))
-        connlist[ip].sendall(send_data)
+        self.connlist[ip].sendall(header)
+        self.connlist[ip].sendall(bytes(padding))
+        self.connlist[ip].sendall(send_data)
 
         #等待回复
-        reply=getHeader(connlist[ip]).decode().rstrip()
-        if reply=='UPDATE END'
-            replycount+=1
+        reply=getHeader(self.connlist[ip]).decode().rstrip()
+        if reply=='UPDATE END':
+            self.replycount+=1
             #判断是否收到全部路由器的回复
-            if replycount>=len[adjlist]:
+            if self.replycount>=len[adjlist]:
                 print('All routers have updated')
-                replycount=0
+                self.replycount=0
                 if on_off=='ON':#回复想要上线的路由器
                     header = "ON OK".encode('utf8')
                     padding = [32 for x in range(HEADER_SIZE - len(header))]
@@ -247,6 +247,6 @@ if __name__ == '__main__':
 
     t = Controller()
 
-    t.waitForPeer()
+    #t.waitForPeer()  #不知道为什么有这一行就会编译的时候一直卡在那里没有输出
 
     pass
