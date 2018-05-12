@@ -12,47 +12,53 @@ v1.0
 并处理各个路由器的上线和下线；每个路由器都存储着当前的路由表，路由器要发送数据时，会根据路由表决定下一跳地址。当有别的路由器
 上线或者下线时，路由器会收到控制器发送的新路由表
 
+
 2.具体实施：
 i.路由器上线：
-Router -> Controller：WANT ON 
+Router -> Controller：WANT ON msgSize msg(该router拥有的files)
 Controller: 
-（1）随机选择已上线的IP（个数随机）与该新上线ip邻接，并随机设置距离（邻接和距离信息存储在一个邻接表中：
+（1）将文件信息存储到resourceMap
+（2）随机选择已上线的IP（个数随机）与该新上线ip邻接，并随机设置距离（邻接和距离信息存储在一个邻接表中：
 map<str,map<str,int>> adjlist）;
-（2）根据邻接表计算每两个节点间的最短路径，并将结果存储在另一个字典中，map<str,map<str,str>> pathlist，
+（3）根据邻接表计算每两个节点间的最短路径，并将结果存储在一个字典中，map<str,map<str,str>> pathlist，
 比如ip3=pathlist[ip1][ip2]表示在ip1到ip2的最短路径中，ip1的下一跳是ip3。这样就生成了每一个路由器的路
 由表（pathlist[ip1]就是路由器ip1的路由表）
-​ -> each Router：UPDATE msgsize, msg(该路由器的路由表pathlist[x])
+ controller-> each Router：UPDATE msgsize msg(该路由器的路由表pathlist[x])
 each Router：接收信息并更新本地路由表
-​ -> Controller：UPDATE END
+ router-> Controller：UPDATE END
 Controller：接收所有的UPDATE END信息，接收完成则
-​ -> 之前想上线的Router：ON OK 
+controller -> 之前想上线的Router：ON OK 
 
 ii.路由器下线：
 Router -> Controller：WANT OFF 
-Controller：在邻接表中删除想下线的路由器IP，重新计算任意两个节点之间的最短路径，并更新pathlist
-​-> 之前想下线的Router：OFF OK
-​ ->each Router (except 想要下线的Router)：UPDATE msgsize msg(该路由器的路由表pathlist[x])
+Controller：更新resourceMap、邻接表，重新计算任意两个节点之间的最短路径，并更新pathlist
+controller-> 之前想下线的Router：OFF OK
+controller->each Router (except 想要下线的Router)：UPDATE msgsize msg(该路由器的路由表pathlist[x])
 each Router：接收信息并更新本地路由表
-​ -> Controller：UPDATE END	
-Controller：接收所有UPDATE END信息
+ router-> Controller：UPDATE END	
+Controller：接收所有UPDATE END信息，打印“All routers have updated ”
 
-iii.路由表实现：
- map<str, str> routeList
-	routeList[ipdest] = ip（下一跳ip）
-	
+iii.路由器向controller请求拥有某个文件的peers的ip列表
+peer->controller:GET filename
+controller->peer:GET OK msgSize msg(iplist)
+
+iv.路由器向其他peer请求文件
+
 v.路由器直接发送数据：
 src Router1：sent ipdest，判断输入是否合法（由本地实现）
-​ data_sent = input()
-​ 根据路由表得出下一跳
-​ -> 下一跳：SENT ipsrc ipdest msgsize, msg(data_sent)
+ data_sent = input()
+ 根据路由表得出下一跳
+(路由表实现：map<str, str> routeList
+	   routeList[ipdest] = ip（下一跳ip)
+ -> 下一跳：SENT ipsrc ipdest msgsize, msg(data_sent)
 Router2：接收信息，由ipdest和路由表获取下一跳
-​ ->下一跳：SENT ipsrc ipdest msgsize, msg(data_sent)
+ ->下一跳：SENT ipsrc ipdest msgsize, msg(data_sent)
 … …
 ->下一跳：SENT ipsrc ipdest msgsize, msg(data_sent)
 dest Routerx：接收信息，输出
-​ ->src Router1：SENT OK ipsrc ipdest
+ ->src Router1：SENT OK ipsrc ipdest
 中间路由：接收信息
-​ -> SENT OK ipsrc ipdest
+ -> SENT OK ipsrc ipdest
 … …
 src Router1：收到回复了
 
