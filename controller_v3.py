@@ -247,6 +247,6 @@ if __name__ == '__main__':
 
     t = Controller()
 
-    #t.waitForPeer()  #不知道为什么有这一行就会编译的时候一直卡在那里没有输出
+    t.waitForPeer()  
 
     pass
