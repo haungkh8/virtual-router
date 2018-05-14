@@ -1,0 +1,283 @@
+import socket
+import os
+from tools import *
+import time
+import threading
+
+
+class Router():
+    def __init__(self, ConAddr='127.0.0.1', ConPort=5555, RPort=6666, MaxConnect=10):
+        """
+            初始化函数，会向服务器发送自己的资源信息
+            ConAddr = 'localhost':指定Controller的地址
+            ConPort = 5555：指定Controller的端口
+            RPort = 6666：用于其他Router连接的端口
+            MaxConnect = 10：最大连接数。即最多被这么多个对等方请求文件
+            # R: WANT ON MESSIZE MSG（filenames)
+            # C: UPDATE msgsize msg(该路由器的路由表pathlist[x])
+            # R: UPDATE END
+            # C: ON OK
+        """
+        #获取本地目录
+        print("hello")
+        
+        #获取本地目录
+        self.dir = os.getcwd()
+        print("now you are at " + self.dir)
+
+        #设置自身ip地址
+        self.ipaddr = 'localhost'
+
+        #创建套接字连接Controller
+        self.Tsock = socket.socket()
+        self.Tsock.connect((ConAddr, ConPort))
+
+        #发送当前目录文件名给Controller
+        send_data = ','.join(os.listdir(self.dir))
+        print("current directory has file: \n  " + send_data)
+        send_data = send_data.encode('utf8')
+        msg_size = len(send_data)
+        header = "WANT ON " + str(msg_size)
+        print(header)
+        header = header.encode('utf8')
+        padding = [32 for x in range(HEADER_SIZE - len(header))]
+        self.Tsock.sendall(header)
+        self.Tsock.sendall(bytes(padding))
+        self.Tsock.sendall(send_data)
+
+        #初始化路由表 map<str, str>: dest -> next
+        self.pathlist = {}
+
+        #接收回复
+        header = getHeader(self.Tsock)
+        print(header)
+        head = header.split(' ')
+        if head[0] == 'UPDATE':
+
+            #接收路由表
+            msgSize = int(head[1])
+            data=[0 for x in range(msgSize)]
+            readNbytes(self.Tsock, data, msgSize)
+
+            #data即路由表的东西
+            pathx = bytes(data).decode('utf8').split(',')
+            for path in pathx:
+                ptemp = path.split(' ')
+                destip = ptemp[0]
+                nextip = ptemp[1]
+                self.pathlist[destip] = nextip
+            self.pathlist[self.ipaddr] = self.ipaddr
+
+            #发送update end
+            header = "UPDATE END"
+            print(header)
+            header = header.encode('utf8')
+            self.Tsock.sendall(header)
+
+            #接收ON OK
+            header = getHeader(self.Tsock)
+            print(header)
+
+        else:
+            print('ERROR, Update receive')
+
+
+        # 等待路由器的连接       
+        self.Psock = socket.socket()
+        self.Psock.bind((self.ipaddr, RPort))
+        self.Psock.listen(MaxConnect)
+        p = threading.Thread(target = self.waitForConnect)
+        p.start()
+
+
+        #等待控制器的更新路由
+        px = threading.Thread(target=self.waitForUpdate)
+        px.start()
+
+    def waitForUpdate(self):
+        """
+            等待控制器的更新路由表
+            # C: UPDATE msgsize msg(该路由器的路由表pathlist[x])
+            # R: UPDATE END
+        """
+        head = getHeader(self.Tsock)
+        print(head) #打印头信息
+        head = head.split(' ')
+        if head[0] == 'UPDATE':
+
+            #接收路由表信息
+            msgSize = int(head[1])
+            data=[0 for x in range(msgSize)]
+            readNbytes(self.Tsock, data, msgSize)
+
+            #初始化路由表后更新
+            self.pathlist = {}
+            pathx = bytes(data).decode('utf8').split(',')
+            for path in pathx:
+                ptemp = path.split(' ')
+                destip = ptemp[0]
+                nextip = ptemp[1]
+                self.pathlist[destip] = nextip
+            self.pathlist[self.ipaddr] = self.ipaddr
+
+            #更新完成后，发送信息
+            header = "UPDATE END"
+            print(header)
+            header = header.encode('utf8')
+            self.Tsock.sendall(bytes(header))
+
+
+        else:
+            print("not update")
+
+    def waitForConnect(self):
+        """
+            开一个线程等待进行监听
+        """
+        while True:
+            conn, addr = self.Psock.accept()
+
+            p = threading.Thread(target = self.recv, args = (conn, ))
+
+            p.start()
+
+    def recv(self, conn, ):
+        """
+            从conn接收信息，解析后将信息传给下一跳
+        """
+        gethead = getHeader(conn)      
+        head = gethead.split(' ')
+        if head[0] == 'SENT':
+            #接收并解析数据
+            ipsrc = head[1]
+            ipdest = head[2]
+            msgSize = int(head[3])
+            data = [0 for x in range(msgSize)]
+            readNbytes(conn, data, msgSize)
+            recv_data = bytes(data).decode('utf8')
+
+            #发送数据
+            if ipdest == self.ipaddr:
+                print(recv_data)
+                print("Successful to sent the message!")
+            
+            else:
+                #传给下一跳：
+
+                ipnext = self.pathlist[ipdest]
+
+                p = threading.Thread(target=self.trans, args=(ipsrc, ipdest, ipnext, recv_data,))
+
+                p.start()
+
+
+
+        else:
+            print("ERROR, sent")
+
+    def srcSend(self, ipdest, send_data):
+        """
+            send ipdest,   send_data = input()
+            # send -> nextip
+        """
+        ipnext = self.pathlist[ipdest]
+        if ipnext == ipdest:
+            print("it's the src addr")
+
+        else:
+
+            p = threading.Thread(target=self.trans, args=(self.ipaddr, ipdest, ipnext, send_data,))
+
+            p.start()
+
+    def trans(self, ipsrc, ipdest, ipnext, recv_data):
+        """
+            # R1: SENT ipsrc ipdest msgSize
+            #     recv_data
+        """
+        Csock = socket.socket()
+        Csock.connect(ipnext, 6666)
+
+        send_data = recv_data.encode('utf8')
+        header = 'SENT ' + ipsrc + ' ' + ipdest + ' ' + str(len(send_data))
+        print(header)
+        header = header.encode('utf8')
+        padding=[32 for x in range(HEADER_SIZE-len(header))]
+        Csock.sendall(header)
+        Csock.sendall(bytes(padding))
+        Csock.sendall(send_data)
+
+    def wantOff(self):
+        """
+            #R: WANT OFF
+            #C: OFF OK
+        """
+        header = "WANT OFF"
+        print(header)
+        header.encode('utf8')
+        self.Tsock.sendall(bytes(header))
+
+        #接收OFF OK
+        head = getHeader(self.Tsock)
+        print(head)
+        if head == 'OFF OK':
+            self.Tsock.close()
+            #还得关闭别的所有线程，涉及套接字的关闭连接，不会
+
+    def show(self, filename):
+        """
+            客户端程序，发送请求
+            #R: GET [filename]
+            #C: GET OK msgSize msg(iplist)
+        """
+        header = 'GET ' + filename
+        print(header)
+        header = header.encode('utf8')
+        padding = [32 for x in range(HEADER_SIZE - len(header))]
+        self.Tsock.sendall(header)
+        self.Tsock.sendall(bytes(padding))
+
+
+        #获取头信息get ok ....
+        gethead = getHeader(self.Tsock)      
+        msgSize = int(gethead[7:])
+        data = [0 for x in range(msgSize)]
+        readNbytes(self.Tsock, data, msgSize)
+        ipliststr = ''.join(bytes(data).decode())
+        print(filename + "'s iplist is:")
+        print(ipliststr.split(','))
+
+    def EXEComm(self):
+        """
+            先开两个线程，一个用于监听peer的请求，
+            另一个用于和tractor交流
+            执行命令的函数
+            命令如SHOW,GET fileName
+        """
+        # 输入并执行命令
+        while(1):
+            cmdLine = str(input(">>> "))
+            if cmdLine == 'help':
+                print("you can press: ")
+                print("  'show' to get all of the peer's message")
+                #print("  'get [filename]' to download the file")
+                print("  'sent [destIp]' to trans info to the [destIp]")
+                print("  'quit' to exit")
+            elif cmdLine[:4] == 'show':
+                self.show(cmdLine[5:])
+            # elif cmdLine[:3] == 'get':
+            #     self.getFile(cmdLine[4:])
+            elif cmdLine[:4] == 'sent':
+                dest = cmdLine[5:]
+                info = str(input(">>> Please input the information you want to trans:\n"))               
+                self.srcSend(dest, info)
+            elif cmdLine[:4] == 'quit':
+                self.wantOff()
+                break
+            else:
+                print("please input the valid message!")
+
+
+if __name__ == '__main__':
+    c = Router()
+    c.EXEComm()
